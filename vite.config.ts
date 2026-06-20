@@ -1,0 +1,10 @@
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  root: '.',
+  server: {
+    port: 5131,
+    strictPort: true,
+    open: true
+  }
+});

@@ -96,15 +96,35 @@ export function findBestSignalMatch(
   return bestMatch;
 }
 
-export function getSignalColor(signal: Signal | null, strength: number): [number, number, number] {
+export function getSignalColor(
+  signal: Signal | null,
+  strength: number,
+  hueMap: Map<string, number> | null = null
+): [number, number, number] {
   if (!signal || strength < 0.1) {
     return [0.08, 0.08, 0.1];
   }
 
-  const hue = signal.id === 'signal_01' ? 0.0
-    : signal.id === 'signal_02' ? 0.62
-    : signal.id === 'signal_03' ? 0.33
-    : 0.12;
+  let hue: number;
+  if (hueMap && hueMap.has(signal.id)) {
+    hue = hueMap.get(signal.id)!;
+  } else if (signal.id === 'signal_01') {
+    hue = 0.0;
+  } else if (signal.id === 'signal_02') {
+    hue = 0.62;
+  } else if (signal.id === 'signal_03') {
+    hue = 0.33;
+  } else if (signal.id === 'signal_04') {
+    hue = 0.78;
+  } else {
+    let hash = 0;
+    for (let i = 0; i < signal.id.length; i++) {
+      hash = ((hash << 5) - hash) + signal.id.charCodeAt(i);
+      hash |= 0;
+    }
+    hue = ((hash % 100) + 100) / 1000 + (Math.abs(hash) % 8) * 0.1;
+    hue = hue % 1;
+  }
 
   const sat = 0.7 * strength;
   const light = 0.35 * strength;

@@ -9,6 +9,7 @@ import {
   type SignalMatch
 } from './signal';
 import type { Signal, SignalsData, TunerState, WeatherOffset } from './types';
+import { generateCreepyChannels } from './seededRandom';
 
 class Game {
   private renderer: CRTRenderer | null = null;
@@ -16,7 +17,14 @@ class Game {
   private knobController: KnobController | null = null;
   private weatherSystem: WeatherSystem | null = null;
 
-  private signals: Signal[] = [];
+  private baseSignals: Signal[] = [];
+  private seededSignals: Signal[] = [];
+  private signalHueMap: Map<string, number> = new Map();
+
+  private get signals(): Signal[] {
+    return [...this.baseSignals, ...this.seededSignals];
+  }
+
   private tuner: TunerState = { vhf: 100, uhf: 400, antenna: 180 };
   private weatherOffset: WeatherOffset = { vhfShift: 0, uhfShift: 0, antennaShift: 0 };
   private currentMatch: SignalMatch = { signal: null, strength: 0, vhfMatch: 0, uhfMatch: 0, antennaMatch: 0 };
@@ -40,6 +48,10 @@ class Game {
     binaryStream: HTMLElement;
     foundCount: HTMLElement;
     audioToggle: HTMLButtonElement;
+    seedInput: HTMLInputElement;
+    seedGenerateBtn: HTMLButtonElement;
+    seedClearBtn: HTMLButtonElement;
+    seedStatus: HTMLElement;
   };
 
   constructor() {
@@ -61,14 +73,19 @@ class Game {
       signalDescription: get('signalOverlay').querySelector('.signal-description') as HTMLElement,
       binaryStream: get('signalOverlay').querySelector('.binary-stream') as HTMLElement,
       foundCount: get('foundCount'),
-      audioToggle: get('audioToggle') as HTMLButtonElement
+      audioToggle: get('audioToggle') as HTMLButtonElement,
+      seedInput: get('seedInput') as HTMLInputElement,
+      seedGenerateBtn: get('seedGenerateBtn') as HTMLButtonElement,
+      seedClearBtn: get('seedClearBtn') as HTMLButtonElement,
+      seedStatus: get('seedStatus') as HTMLElement
     };
   }
 
   async init(): Promise<void> {
     try {
       const signalsData = await this.loadSignals();
-      this.signals = signalsData.signals;
+      this.baseSignals = signalsData.signals;
+      this.updateFoundCount();
       this.weatherSystem = new WeatherSystem(signalsData.weatherConfig);
     } catch (e) {
       console.error('Failed to load signals:', e);
@@ -119,6 +136,20 @@ class Game {
       this.elements.audioToggle.classList.toggle('active', enabled);
     });
 
+    this.elements.seedGenerateBtn.addEventListener('click', () => {
+      this.generateSeededChannels();
+    });
+
+    this.elements.seedInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        this.generateSeededChannels();
+      }
+    });
+
+    this.elements.seedClearBtn.addEventListener('click', () => {
+      this.clearSeededChannels();
+    });
+
     window.addEventListener('resize', () => {
       this.renderer?.resize();
     });
@@ -132,6 +163,64 @@ class Game {
     const response = await fetch('/signals.json');
     if (!response.ok) throw new Error('Failed to load signals');
     return response.json();
+  }
+
+  private generateSeededChannels(): void {
+    const seed = this.elements.seedInput.value.trim();
+    if (!seed) return;
+
+    const generated = generateCreepyChannels(seed, 5);
+    this.seededSignals = generated.signals;
+
+    for (const [id, hue] of generated.hueMap) {
+      this.signalHueMap.set(id, hue);
+    }
+
+    this.elements.seedStatus.textContent = `Seed: "${seed}" — ${this.seededSignals.length} channels`;
+    this.elements.seedStatus.classList.add('active');
+    this.elements.seedClearBtn.style.display = 'inline-block';
+    this.elements.seedGenerateBtn.disabled = true;
+    this.elements.seedInput.disabled = true;
+    this.updateFoundCount();
+  }
+
+  private clearSeededChannels(): void {
+    const seededIds = new Set(this.seededSignals.map(s => s.id));
+    for (const id of seededIds) {
+      this.signalHueMap.delete(id);
+      this.foundSignals.delete(id);
+    }
+    this.seededSignals = [];
+
+    this.elements.seedStatus.textContent = 'No active seed';
+    this.elements.seedStatus.classList.remove('active');
+    this.elements.seedClearBtn.style.display = 'none';
+    this.elements.seedGenerateBtn.disabled = false;
+    this.elements.seedInput.disabled = false;
+    this.elements.seedInput.value = '';
+    this.updateFoundCount();
+  }
+
+  private updateFoundCount(): void {
+    const totalSignals = this.signals.length;
+    const actualFound = Array.from(this.foundSignals).filter(id =>
+      this.signals.some(s => s.id === id)
+    ).length;
+    this.elements.foundCount.textContent = `Signals found: ${actualFound} / ${totalSignals}`;
+  }
+
+  private getSignalBaseFreq(signalId: string): number {
+    if (signalId === 'signal_01') return 220;
+    if (signalId === 'signal_02') return 440;
+    if (signalId === 'signal_03') return 660;
+    if (signalId === 'signal_04') return 550;
+    let hash = 0;
+    for (let i = 0; i < signalId.length; i++) {
+      hash = ((hash << 5) - hash) + signalId.charCodeAt(i);
+      hash |= 0;
+    }
+    const freqs = [110, 146.83, 164.81, 196, 233.08, 277.18, 311.13, 349.23, 392, 466.16, 523.25, 587.33];
+    return freqs[Math.abs(hash) % freqs.length];
   }
 
   private updateSignalMatch(): void {
@@ -151,7 +240,7 @@ class Game {
     const targetVhsTint = this.smoothedStrength > 0.4 ? this.smoothedStrength : 0;
     this.smoothedVhsTint = lerp(this.smoothedVhsTint, targetVhsTint, 0.08);
 
-    const targetColor = getSignalColor(this.currentMatch.signal, this.smoothedStrength);
+    const targetColor = getSignalColor(this.currentMatch.signal, this.smoothedStrength, this.signalHueMap);
     this.smoothedSignalColor = [
       lerp(this.smoothedSignalColor[0], targetColor[0], 0.1),
       lerp(this.smoothedSignalColor[1], targetColor[1], 0.1),
@@ -176,7 +265,7 @@ class Game {
 
         if (!this.foundSignals.has(signal.id)) {
           this.foundSignals.add(signal.id);
-          this.elements.foundCount.textContent = `Signals found: ${this.foundSignals.size} / ${this.signals.length}`;
+          this.updateFoundCount();
         }
       }
     }
@@ -215,10 +304,7 @@ class Game {
 
       this.audioManager.setNoiseIntensity(this.smoothedStrength);
       if (this.currentMatch.signal && this.smoothedStrength > 0.3) {
-        const baseFreq = this.currentMatch.signal.id === 'signal_01' ? 220
-          : this.currentMatch.signal.id === 'signal_02' ? 440
-          : this.currentMatch.signal.id === 'signal_03' ? 660
-          : 330;
+        const baseFreq = this.getSignalBaseFreq(this.currentMatch.signal.id);
         const wobble = Math.sin(performance.now() * 0.008) * 15;
         this.audioManager.setSignalTone(baseFreq + wobble, this.smoothedStrength);
       } else {

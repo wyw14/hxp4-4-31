@@ -70,6 +70,24 @@
           <div>Drag knobs to tune • Scroll to fine-tune</div>
           <div id="foundCount">Signals found: 0 / 4</div>
         </div>
+
+        <div class="seed-generator-panel">
+          <div class="seed-generator-label">SEED CHANNELS</div>
+          <div class="seed-generator-row">
+            <input
+              type="text"
+              id="seedInput"
+              class="seed-input"
+              placeholder="Enter seed phrase..."
+              maxlength="32"
+            />
+            <button class="seed-generate-btn" id="seedGenerateBtn">TUNE</button>
+          </div>
+          <div class="seed-info-row">
+            <span id="seedStatus" class="seed-status">No active seed</span>
+            <button class="seed-clear-btn" id="seedClearBtn" style="display: none;">CLEAR</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
